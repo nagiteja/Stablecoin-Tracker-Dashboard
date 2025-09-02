@@ -39,10 +39,12 @@ class CoinGeckoCollector:
                         'include_market_cap': 'true'
                     }
                     
+                    headers = {}
                     if self.api_key:
-                        params['x_cg_demo_api_key'] = self.api_key
+                        headers['x-cg-demo-api-key'] = self.api_key
+                        headers['x-cg-demo-api-label'] = 'nagiteja'
                     
-                    async with session.get(url, params=params) as response:
+                    async with session.get(url, params=params, headers=headers) as response:
                         if response.status == 200:
                             data = await response.json()
                             return data
@@ -64,10 +66,12 @@ class CoinGeckoCollector:
                         'days': days
                     }
                     
+                    headers = {}
                     if self.api_key:
-                        params['x_cg_demo_api_key'] = self.api_key
+                        headers['x-cg-demo-api-key'] = self.api_key
+                        headers['x-cg-demo-api-label'] = 'nagiteja'
                     
-                    async with session.get(url, params=params) as response:
+                    async with session.get(url, params=params, headers=headers) as response:
                         if response.status == 200:
                             data = await response.json()
                             
@@ -85,6 +89,49 @@ class CoinGeckoCollector:
         except Exception as e:
             logger.error(f"Error fetching historical data for {symbol}: {e}")
             return pd.DataFrame()
+
+class BinanceCollector:
+    """Collects stablecoin price data from Binance API (free, no key required)"""
+    
+    def __init__(self):
+        self.base_url = "https://api.binance.com/api/v3"
+        
+    async def get_stablecoin_prices(self, symbols: List[str]) -> Dict:
+        """Fetch current prices for stablecoins from Binance"""
+        try:
+            async with aiohttp.ClientSession() as session:
+                result = {}
+                for symbol in symbols:
+                    try:
+                        # Binance uses USDT as quote currency
+                        if symbol.upper() != 'USDT':
+                            ticker = f"{symbol.upper()}USDT"
+                            url = f"{self.base_url}/ticker/price"
+                            params = {'symbol': ticker}
+                            
+                            async with session.get(url, params=params) as response:
+                                if response.status == 200:
+                                    data = await response.json()
+                                    result[symbol.lower()] = {
+                                        'usd': float(data['price']),
+                                        'usd_market_cap': 0,  # Binance doesn't provide market cap
+                                        'usd_24h_change': 0   # Would need 24h ticker for this
+                                    }
+                        else:
+                            # USDT is always $1.00
+                            result['usdt'] = {
+                                'usd': 1.0,
+                                'usd_market_cap': 0,
+                                'usd_24h_change': 0
+                            }
+                    except Exception as e:
+                        logger.error(f"Error fetching Binance data for {symbol}: {e}")
+                        continue
+                        
+                return result
+        except Exception as e:
+            logger.error(f"Error in Binance collector: {e}")
+            return {}
 
 class DeFiLlamaCollector:
     """Collects DeFi protocol data and TVL information"""
@@ -188,15 +235,21 @@ class DataAggregator:
     
     def __init__(self):
         self.coingecko = CoinGeckoCollector()
+        self.binance = BinanceCollector()
         self.defillama = DeFiLlamaCollector()
         self.etherscan = EtherscanCollector()
         
     async def collect_all_data(self) -> Dict:
         """Collect comprehensive data for all stablecoins"""
         try:
-            # Collect price data
+            # Collect price data - try CoinGecko first, then Binance as fallback
             symbols = list(STABLECOINS.keys())
             prices = await self.coingecko.get_stablecoin_prices(symbols)
+            
+            # If CoinGecko fails, try Binance
+            if not prices or not any(prices.values()):
+                logger.info("CoinGecko failed, trying Binance API...")
+                prices = await self.binance.get_stablecoin_prices(symbols)
             
             # Collect on-chain data
             on_chain_data = {}
