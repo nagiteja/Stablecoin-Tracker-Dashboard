@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  stablecoin-dashboard:
+    build: .
+    container_name: stablecoin-dashboard
+    ports:
+      - "8050:8050"
+    environment:
+      - COINGECKO_API_KEY=${COINGECKO_API_KEY:-}
+      - ETHERSCAN_API_KEY=${ETHERSCAN_API_KEY:-}
+      - DEFILLAMA_API_KEY=${DEFILLAMA_API_KEY:-}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8050/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - dashboard-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: stablecoin-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - stablecoin-dashboard
+    restart: unless-stopped
+    networks:
+      - dashboard-network
+
+networks:
+  dashboard-network:
+    driver: bridge
+
+volumes:
+  data:
